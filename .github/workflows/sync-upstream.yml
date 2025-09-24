@@ -1,0 +1,43 @@
+name: Sync Fork
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'  # Runs every day at midnight UTC
+  workflow_dispatch:      # Allows you to run this workflow manually from the Actions tab
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Fork
+        uses: actions/checkout@v3
+        with:
+          # Using a personal access token is recommended for pushing changes.
+          # The GITHUB_TOKEN has restricted permissions.
+          token: ${{ secrets.GH_PAT }}
+          fetch-depth: 0 # Fetches all history for all branches and tags
+
+      - name: Set up Git
+        run: |
+          git config --global user.name "${{ github.actor }}"
+          git config --global user.email "${{ github.actor }}@users.noreply.github.com"
+
+      - name: Add Upstream Remote
+        run: git remote add upstream https://github.com/djteang/OrangeTV.git
+
+      - name: Fetch Upstream
+        run: git fetch upstream
+
+      - name: Sync main Branch
+        run: |
+          git checkout main
+          git merge upstream/main
+          git push origin main
+
+      # Repeat for other branches you want to sync
+      # - name: Sync develop Branch
+      #   run: |
+      #     git checkout develop
+      #     git merge upstream/develop
+      #     git push origin develop
