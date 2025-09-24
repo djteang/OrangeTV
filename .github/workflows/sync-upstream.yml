@@ -12,6 +12,6 @@ jobs:
       - name: Sync upstream changes
         uses: dabreadman/fork-sync-with-upstream-action@v1
         with:
-          upstream_repository: djteang/OrangeTV
+          upstream_repository: https://github.com/djteang/OrangeTV
           target_branch: main
           github_token: ${{ secrets.GITHUB_TOKEN }}
