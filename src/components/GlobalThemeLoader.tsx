@@ -2,87 +2,95 @@
 
 import { useEffect } from 'react';
 
-// 全局主题加载器组件 - 确保主题配置始终正确，优先信任服务端配置
+// 全局主题加载器组件 - 从API同步最新配置，确保缓存与服务端一致
 const GlobalThemeLoader = () => {
   useEffect(() => {
-    const validateAndSyncTheme = async () => {
+    const syncThemeWithAPI = async () => {
       try {
-        // 检查服务端预设的配置
-        const runtimeConfig = (window as any).RUNTIME_CONFIG;
-        const serverThemeConfig = runtimeConfig?.THEME_CONFIG;
-
-        console.log('检查服务端预设主题配置:', serverThemeConfig);
-
-        if (serverThemeConfig && serverThemeConfig.defaultTheme !== 'default') {
-          // 服务端有非默认配置，优先使用服务端配置
-          console.log('使用服务端主题配置，跳过API检查:', serverThemeConfig);
-
-          // 确保服务端配置已正确应用到DOM
-          const html = document.documentElement;
-          const currentTheme = html.getAttribute('data-theme');
-
-          if (currentTheme !== serverThemeConfig.defaultTheme) {
-            console.log('DOM主题与服务端配置不一致，重新应用:', {
-              current: currentTheme,
-              expected: serverThemeConfig.defaultTheme
-            });
-            applyTheme(serverThemeConfig.defaultTheme, serverThemeConfig.customCSS || '');
-          } else {
-            console.log('服务端主题配置已正确应用，无需更新');
-          }
-          return;
-        }
-
-        // 只有当服务端配置为默认值时，才从API获取配置
-        console.log('服务端为默认配置，从API获取最新配置...');
-        const response = await fetch('/api/theme');
+        console.log('从API同步主题配置...');
+        const response = await fetch('/api/admin/config');
         const result = await response.json();
 
-        if (result.success && result.data) {
-          const { defaultTheme, customCSS } = result.data;
-          const isFallback = result.fallback;
+        if (result?.Config?.ThemeConfig) {
+          const themeConfig = result.Config.ThemeConfig;
+          const { defaultTheme, customCSS, allowUserCustomization } = themeConfig;
 
-          console.log('从API获取到主题配置:', {
+          console.log('API返回主题配置:', {
             defaultTheme,
             customCSS,
-            isFallback: !!isFallback,
-            error: result.error
+            allowUserCustomization
           });
 
-          if (isFallback) {
-            console.log('API返回备用配置，保持服务端设置不变');
-            return;
+          // 获取当前缓存的主题配置
+          const cachedTheme = getCachedTheme();
+
+          // 比较API配置与缓存配置
+          const configChanged = !cachedTheme ||
+            cachedTheme.defaultTheme !== defaultTheme ||
+            cachedTheme.customCSS !== customCSS;
+
+          if (configChanged) {
+            console.log('检测到主题配置变更，更新应用:', {
+              from: cachedTheme,
+              to: { defaultTheme, customCSS }
+            });
+            applyAndCacheTheme(defaultTheme, customCSS);
+          } else {
+            console.log('主题配置无变化，保持当前设置');
           }
 
-          // 只有API返回非默认配置且非备用配置时才应用
-          if (defaultTheme !== 'default' || customCSS) {
-            console.log('应用API获取的有效主题配置:', { defaultTheme, customCSS });
-            applyTheme(defaultTheme, customCSS);
-
-            // 更新运行时配置
-            if (runtimeConfig) {
-              runtimeConfig.THEME_CONFIG = { defaultTheme, customCSS, allowUserCustomization: true };
-            }
-          } else {
-            console.log('API返回默认配置，保持当前状态');
+          // 将配置存储到运行时配置中，供ThemeManager使用
+          const runtimeConfig = (window as any).RUNTIME_CONFIG;
+          if (runtimeConfig) {
+            runtimeConfig.THEME_CONFIG = themeConfig;
           }
         } else {
-          console.log('API获取失败，保持当前主题配置');
+          console.log('无法获取主题配置，使用默认配置:', result);
+          // API失败时，如果有缓存就保持，没有缓存就用默认
+          const cachedTheme = getCachedTheme();
+          if (!cachedTheme) {
+            console.log('无缓存，应用默认主题');
+            applyAndCacheTheme('default', '');
+          } else {
+            console.log('保持缓存主题:', cachedTheme);
+          }
         }
       } catch (error) {
-        console.error('主题配置验证失败:', error);
-
-        // 出错时优先使用服务端配置
-        const runtimeConfig = (window as any).RUNTIME_CONFIG;
-        const serverThemeConfig = runtimeConfig?.THEME_CONFIG;
-
-        if (serverThemeConfig) {
-          console.log('错误恢复：使用服务端配置:', serverThemeConfig);
-          applyTheme(serverThemeConfig.defaultTheme, serverThemeConfig.customCSS || '');
+        console.error('API同步失败:', error);
+        // 错误时如果有缓存就保持，没有缓存就用默认
+        const cachedTheme = getCachedTheme();
+        if (!cachedTheme) {
+          console.log('无缓存且请求失败，应用默认主题');
+          applyAndCacheTheme('default', '');
         } else {
-          console.log('错误恢复：使用默认主题');
-          applyTheme('default', '');
+          console.log('请求失败，保持缓存主题:', cachedTheme);
         }
+      }
+    };
+
+    // 获取缓存的主题配置
+    const getCachedTheme = () => {
+      try {
+        const cached = localStorage.getItem('theme-cache');
+        return cached ? JSON.parse(cached) : null;
+      } catch (error) {
+        console.warn('读取主题缓存失败:', error);
+        localStorage.removeItem('theme-cache');
+        return null;
+      }
+    };
+
+    // 应用主题并缓存
+    const applyAndCacheTheme = (themeId: string, css: string = '') => {
+      applyTheme(themeId, css);
+
+      // 缓存主题配置
+      const themeConfig = { defaultTheme: themeId, customCSS: css };
+      try {
+        localStorage.setItem('theme-cache', JSON.stringify(themeConfig));
+        console.log('主题配置已缓存:', themeConfig);
+      } catch (error) {
+        console.warn('缓存主题配置失败:', error);
       }
     };
 
@@ -108,9 +116,9 @@ const GlobalThemeLoader = () => {
       customStyleEl.textContent = css;
     };
 
-    // 稍作延迟，确保DOM完全加载后再验证主题
+    // 延迟一点时间，确保页面缓存主题已应用，然后同步API配置
     const timer = setTimeout(() => {
-      validateAndSyncTheme();
+      syncThemeWithAPI();
     }, 100);
 
     return () => clearTimeout(timer);

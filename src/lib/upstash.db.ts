@@ -72,7 +72,14 @@ export class UpstashRedisStorage implements IStorage {
     const val = await withRetry(() =>
       this.client.get(this.prKey(userName, key))
     );
-    return val ? (val as PlayRecord) : null;
+    if (!val) return null;
+
+    try {
+      return typeof val === 'string' ? JSON.parse(val) : val as PlayRecord;
+    } catch (error) {
+      console.error('解析播放记录失败:', error);
+      return null;
+    }
   }
 
   async setPlayRecord(
@@ -80,7 +87,7 @@ export class UpstashRedisStorage implements IStorage {
     key: string,
     record: PlayRecord
   ): Promise<void> {
-    await withRetry(() => this.client.set(this.prKey(userName, key), record));
+    await withRetry(() => this.client.set(this.prKey(userName, key), JSON.stringify(record)));
   }
 
   async getAllPlayRecords(
@@ -94,9 +101,14 @@ export class UpstashRedisStorage implements IStorage {
     for (const fullKey of keys) {
       const value = await withRetry(() => this.client.get(fullKey));
       if (value) {
-        // 截取 source+id 部分
-        const keyPart = ensureString(fullKey.replace(`u:${userName}:pr:`, ''));
-        result[keyPart] = value as PlayRecord;
+        try {
+          // 截取 source+id 部分
+          const keyPart = ensureString(fullKey.replace(`u:${userName}:pr:`, ''));
+          const record = typeof value === 'string' ? JSON.parse(value) : value as PlayRecord;
+          result[keyPart] = record;
+        } catch (error) {
+          console.error('解析播放记录失败:', error, 'key:', fullKey);
+        }
       }
     }
     return result;
@@ -115,7 +127,14 @@ export class UpstashRedisStorage implements IStorage {
     const val = await withRetry(() =>
       this.client.get(this.favKey(userName, key))
     );
-    return val ? (val as Favorite) : null;
+    if (!val) return null;
+
+    try {
+      return typeof val === 'string' ? JSON.parse(val) : val as Favorite;
+    } catch (error) {
+      console.error('解析收藏失败:', error);
+      return null;
+    }
   }
 
   async setFavorite(
@@ -124,7 +143,7 @@ export class UpstashRedisStorage implements IStorage {
     favorite: Favorite
   ): Promise<void> {
     await withRetry(() =>
-      this.client.set(this.favKey(userName, key), favorite)
+      this.client.set(this.favKey(userName, key), JSON.stringify(favorite))
     );
   }
 
@@ -137,8 +156,13 @@ export class UpstashRedisStorage implements IStorage {
     for (const fullKey of keys) {
       const value = await withRetry(() => this.client.get(fullKey));
       if (value) {
-        const keyPart = ensureString(fullKey.replace(`u:${userName}:fav:`, ''));
-        result[keyPart] = value as Favorite;
+        try {
+          const keyPart = ensureString(fullKey.replace(`u:${userName}:fav:`, ''));
+          const favorite = typeof value === 'string' ? JSON.parse(value) : value as Favorite;
+          result[keyPart] = favorite;
+        } catch (error) {
+          console.error('解析收藏失败:', error, 'key:', fullKey);
+        }
       }
     }
     return result;
@@ -270,11 +294,24 @@ export class UpstashRedisStorage implements IStorage {
 
   async getAdminConfig(): Promise<AdminConfig | null> {
     const val = await withRetry(() => this.client.get(this.adminConfigKey()));
-    return val ? (val as AdminConfig) : null;
+    if (!val) return null;
+
+    try {
+      // 尝试解析JSON字符串（兼容BaseRedisStorage格式）
+      if (typeof val === 'string') {
+        return JSON.parse(val) as AdminConfig;
+      }
+      // 如果已经是对象，直接返回（Upstash自动反序列化的情况）
+      return val as AdminConfig;
+    } catch (error) {
+      console.error('解析管理员配置失败:', error);
+      return null;
+    }
   }
 
   async setAdminConfig(config: AdminConfig): Promise<void> {
-    await withRetry(() => this.client.set(this.adminConfigKey(), config));
+    // 统一使用JSON字符串格式存储，与BaseRedisStorage保持一致
+    await withRetry(() => this.client.set(this.adminConfigKey(), JSON.stringify(config)));
   }
 
   // ---------- 跳过片头片尾配置 ----------
@@ -290,7 +327,14 @@ export class UpstashRedisStorage implements IStorage {
     const val = await withRetry(() =>
       this.client.get(this.skipConfigKey(userName, source, id))
     );
-    return val ? (val as SkipConfig) : null;
+    if (!val) return null;
+
+    try {
+      return typeof val === 'string' ? JSON.parse(val) : val as SkipConfig;
+    } catch (error) {
+      console.error('解析跳过配置失败:', error);
+      return null;
+    }
   }
 
   async setSkipConfig(
@@ -300,7 +344,7 @@ export class UpstashRedisStorage implements IStorage {
     config: SkipConfig
   ): Promise<void> {
     await withRetry(() =>
-      this.client.set(this.skipConfigKey(userName, source, id), config)
+      this.client.set(this.skipConfigKey(userName, source, id), JSON.stringify(config))
     );
   }
 
@@ -332,11 +376,16 @@ export class UpstashRedisStorage implements IStorage {
     keys.forEach((key, index) => {
       const value = values[index];
       if (value) {
-        // 从key中提取source+id
-        const match = key.match(/^u:.+?:skip:(.+)$/);
-        if (match) {
-          const sourceAndId = match[1];
-          configs[sourceAndId] = value as SkipConfig;
+        try {
+          // 从key中提取source+id
+          const match = key.match(/^u:.+?:skip:(.+)$/);
+          if (match) {
+            const sourceAndId = match[1];
+            const config = typeof value === 'string' ? JSON.parse(value) : value as SkipConfig;
+            configs[sourceAndId] = config;
+          }
+        } catch (error) {
+          console.error('解析跳过配置失败:', error, 'key:', key);
         }
       }
     });
@@ -373,7 +422,16 @@ export class UpstashRedisStorage implements IStorage {
 
   async getDanmu(videoId: string): Promise<any[]> {
     const val = await withRetry(() => this.client.lrange(this.danmuKey(videoId), 0, -1));
-    return val ? val.map(item => JSON.parse(ensureString(item))) : [];
+    if (!val || !Array.isArray(val)) return [];
+
+    return val.map(item => {
+      try {
+        return typeof item === 'string' ? JSON.parse(item) : item;
+      } catch (error) {
+        console.error('解析弹幕数据失败:', error);
+        return null;
+      }
+    }).filter(item => item !== null);
   }
 
   async saveDanmu(videoId: string, userName: string, danmu: {
@@ -425,9 +483,11 @@ export class UpstashRedisStorage implements IStorage {
     if (!val) return null;
 
     try {
-      const data = JSON.parse(ensureString(val));
+      // 处理不同的序列化格式
+      const data = typeof val === 'string' ? JSON.parse(val) : val;
       return data.machineCode || null;
-    } catch {
+    } catch (error) {
+      console.error('解析用户机器码失败:', error);
       return null;
     }
   }
@@ -439,7 +499,7 @@ export class UpstashRedisStorage implements IStorage {
       bindTime: Date.now()
     };
 
-    // 保存用户的机器码
+    // 保存用户的机器码 - 统一使用JSON序列化
     await withRetry(() =>
       this.client.set(this.machineCodeKey(userName), JSON.stringify(data))
     );
@@ -481,10 +541,11 @@ export class UpstashRedisStorage implements IStorage {
 
         if (val) {
           try {
-            const data = JSON.parse(ensureString(val));
+            // 处理不同的序列化格式
+            const data = typeof val === 'string' ? JSON.parse(val) : val;
             result[userName] = data;
-          } catch {
-            // 忽略解析错误
+          } catch (error) {
+            console.error('解析机器码用户数据失败:', error, 'key:', key);
           }
         }
       }
@@ -536,9 +597,9 @@ export class UpstashRedisStorage implements IStorage {
 
   // 消息管理
   async saveMessage(message: ChatMessage): Promise<void> {
-    // 保存消息详情
+    // 保存消息详情 - 使用JSON序列化
     await withRetry(() =>
-      this.client.set(this.messageKey(message.id), message)
+      this.client.set(this.messageKey(message.id), JSON.stringify(message))
     );
 
     // 将消息ID添加到对话的消息列表中（按时间排序）
@@ -560,7 +621,12 @@ export class UpstashRedisStorage implements IStorage {
     for (const messageId of messageIds) {
       const messageData = await withRetry(() => this.client.get(this.messageKey(messageId as string)));
       if (messageData) {
-        messages.push(messageData as ChatMessage);
+        try {
+          const message = typeof messageData === 'string' ? JSON.parse(messageData) : messageData;
+          messages.push(message as ChatMessage);
+        } catch (error) {
+          console.error('解析消息失败:', error);
+        }
       }
     }
 
@@ -570,11 +636,15 @@ export class UpstashRedisStorage implements IStorage {
   async markMessageAsRead(messageId: string): Promise<void> {
     const messageData = await withRetry(() => this.client.get(this.messageKey(messageId)));
     if (messageData) {
-      const message = messageData as ChatMessage;
-      message.is_read = true;
-      await withRetry(() =>
-        this.client.set(this.messageKey(messageId), message)
-      );
+      try {
+        const message = typeof messageData === 'string' ? JSON.parse(messageData) : messageData as ChatMessage;
+        message.is_read = true;
+        await withRetry(() =>
+          this.client.set(this.messageKey(messageId), JSON.stringify(message))
+        );
+      } catch (error) {
+        console.error('标记消息为已读失败:', error);
+      }
     }
   }
 
@@ -601,13 +671,20 @@ export class UpstashRedisStorage implements IStorage {
       this.client.get(this.conversationKey(conversationId))
     );
 
-    return conversationData ? (conversationData as Conversation) : null;
+    if (!conversationData) return null;
+
+    try {
+      return typeof conversationData === 'string' ? JSON.parse(conversationData) : conversationData as Conversation;
+    } catch (error) {
+      console.error('解析对话失败:', error);
+      return null;
+    }
   }
 
   async createConversation(conversation: Conversation): Promise<void> {
-    // 保存对话详情
+    // 保存对话详情 - 使用JSON序列化
     await withRetry(() =>
-      this.client.set(this.conversationKey(conversation.id), conversation)
+      this.client.set(this.conversationKey(conversation.id), JSON.stringify(conversation))
     );
 
     // 将对话ID添加到每个参与者的对话列表中
@@ -623,7 +700,7 @@ export class UpstashRedisStorage implements IStorage {
     if (conversation) {
       Object.assign(conversation, updates);
       await withRetry(() =>
-        this.client.set(this.conversationKey(conversationId), conversation)
+        this.client.set(this.conversationKey(conversationId), JSON.stringify(conversation))
       );
     }
   }
@@ -656,7 +733,12 @@ export class UpstashRedisStorage implements IStorage {
     for (const friendId of friendIds) {
       const friendData = await withRetry(() => this.client.get(this.friendKey(friendId)));
       if (friendData) {
-        friends.push(friendData as Friend);
+        try {
+          const friend = typeof friendData === 'string' ? JSON.parse(friendData) : friendData;
+          friends.push(friend as Friend);
+        } catch (error) {
+          console.error('解析好友数据失败:', error);
+        }
       }
     }
 
@@ -664,9 +746,9 @@ export class UpstashRedisStorage implements IStorage {
   }
 
   async addFriend(userName: string, friend: Friend): Promise<void> {
-    // 保存好友详情
+    // 保存好友详情 - 使用JSON序列化
     await withRetry(() =>
-      this.client.set(this.friendKey(friend.id), friend)
+      this.client.set(this.friendKey(friend.id), JSON.stringify(friend))
     );
 
     // 将好友ID添加到用户的好友列表中
@@ -688,11 +770,15 @@ export class UpstashRedisStorage implements IStorage {
   async updateFriendStatus(friendId: string, status: Friend['status']): Promise<void> {
     const friendData = await withRetry(() => this.client.get(this.friendKey(friendId)));
     if (friendData) {
-      const friend = friendData as Friend;
-      friend.status = status;
-      await withRetry(() =>
-        this.client.set(this.friendKey(friendId), friend)
-      );
+      try {
+        const friend = typeof friendData === 'string' ? JSON.parse(friendData) : friendData as Friend;
+        friend.status = status;
+        await withRetry(() =>
+          this.client.set(this.friendKey(friendId), JSON.stringify(friend))
+        );
+      } catch (error) {
+        console.error('更新好友状态失败:', error);
+      }
     }
   }
 
@@ -706,10 +792,14 @@ export class UpstashRedisStorage implements IStorage {
     for (const requestId of requestIds) {
       const requestData = await withRetry(() => this.client.get(this.friendRequestKey(requestId)));
       if (requestData) {
-        const request = requestData as FriendRequest;
-        // 只返回相关的申请（发送给该用户的或该用户发送的）
-        if (request.to_user === userName || request.from_user === userName) {
-          requests.push(request);
+        try {
+          const request = typeof requestData === 'string' ? JSON.parse(requestData) : requestData as FriendRequest;
+          // 只返回相关的申请（发送给该用户的或该用户发送的）
+          if (request.to_user === userName || request.from_user === userName) {
+            requests.push(request);
+          }
+        } catch (error) {
+          console.error('解析好友申请失败:', error);
         }
       }
     }
@@ -718,9 +808,9 @@ export class UpstashRedisStorage implements IStorage {
   }
 
   async createFriendRequest(request: FriendRequest): Promise<void> {
-    // 保存申请详情
+    // 保存申请详情 - 使用JSON序列化
     await withRetry(() =>
-      this.client.set(this.friendRequestKey(request.id), request)
+      this.client.set(this.friendRequestKey(request.id), JSON.stringify(request))
     );
 
     // 将申请ID添加到双方的申请列表中
@@ -735,27 +825,35 @@ export class UpstashRedisStorage implements IStorage {
   async updateFriendRequest(requestId: string, status: FriendRequest['status']): Promise<void> {
     const requestData = await withRetry(() => this.client.get(this.friendRequestKey(requestId)));
     if (requestData) {
-      const request = requestData as FriendRequest;
-      request.status = status;
-      request.updated_at = Date.now();
-      await withRetry(() =>
-        this.client.set(this.friendRequestKey(requestId), request)
-      );
+      try {
+        const request = typeof requestData === 'string' ? JSON.parse(requestData) : requestData as FriendRequest;
+        request.status = status;
+        request.updated_at = Date.now();
+        await withRetry(() =>
+          this.client.set(this.friendRequestKey(requestId), JSON.stringify(request))
+        );
+      } catch (error) {
+        console.error('更新好友申请失败:', error);
+      }
     }
   }
 
   async deleteFriendRequest(requestId: string): Promise<void> {
     const requestData = await withRetry(() => this.client.get(this.friendRequestKey(requestId)));
     if (requestData) {
-      const request = requestData as FriendRequest;
+      try {
+        const request = typeof requestData === 'string' ? JSON.parse(requestData) : requestData as FriendRequest;
 
-      // 从双方的申请列表中移除
-      await withRetry(() =>
-        this.client.srem(this.userFriendRequestsKey(request.from_user), requestId)
-      );
-      await withRetry(() =>
-        this.client.srem(this.userFriendRequestsKey(request.to_user), requestId)
-      );
+        // 从双方的申请列表中移除
+        await withRetry(() =>
+          this.client.srem(this.userFriendRequestsKey(request.from_user), requestId)
+        );
+        await withRetry(() =>
+          this.client.srem(this.userFriendRequestsKey(request.to_user), requestId)
+        );
+      } catch (error) {
+        console.error('删除好友申请失败:', error);
+      }
     }
 
     // 删除申请详情

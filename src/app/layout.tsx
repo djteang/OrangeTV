@@ -6,7 +6,6 @@ import { Inter } from 'next/font/google';
 import './globals.css';
 
 import { getConfig } from '@/lib/config';
-import { db } from '@/lib/db';
 
 import { GlobalErrorIndicator } from '../components/GlobalErrorIndicator';
 import { SiteProvider } from '../components/SiteProvider';
@@ -43,33 +42,6 @@ export default async function RootLayout({
   children: React.ReactNode;
 }) {
   const storageType = process.env.NEXT_PUBLIC_STORAGE_TYPE || 'localstorage';
-
-  // 预先获取主题配置
-  let themeConfig = {
-    defaultTheme: 'default',
-    customCSS: '',
-    allowUserCustomization: true
-  };
-
-  try {
-    if (storageType !== 'localstorage') {
-      const adminConfig = await db.getAdminConfig();
-      if (adminConfig?.ThemeConfig) {
-        themeConfig = {
-          defaultTheme: adminConfig.ThemeConfig.defaultTheme || 'default',
-          customCSS: adminConfig.ThemeConfig.customCSS || '',
-          allowUserCustomization: adminConfig.ThemeConfig.allowUserCustomization !== false,
-        };
-        console.log('服务端获取主题配置成功:', themeConfig);
-      } else {
-        console.log('服务端配置中没有主题配置，使用默认配置');
-      }
-    } else {
-      console.log('LocalStorage模式，使用默认主题配置');
-    }
-  } catch (error) {
-    console.error('服务端获取主题配置失败，使用默认配置:', error);
-  }
 
   let siteName = process.env.NEXT_PUBLIC_SITE_NAME || 'OrangeTV';
   let announcement =
@@ -122,7 +94,6 @@ export default async function RootLayout({
     CUSTOM_CATEGORIES: customCategories,
     FLUID_SEARCH: fluidSearch,
     REQUIRE_DEVICE_CODE: requireDeviceCode,
-    THEME_CONFIG: themeConfig,
   };
 
   return (
@@ -141,84 +112,59 @@ export default async function RootLayout({
           }}
         />
 
-        {/* 主题初始化脚本 - 内联执行，确保在生产环境中立即应用主题 */}
+        {/* 立即从缓存应用主题，避免闪烁 */}
         {/* eslint-disable-next-line @next/next/no-sync-scripts */}
         <script
           dangerouslySetInnerHTML={{
             __html: `
               (function() {
                 try {
-                  console.log('开始初始化主题...');
+                  // 从localStorage立即获取缓存的主题配置
+                  const cachedTheme = localStorage.getItem('theme-cache');
                   
-                  // 应用主题函数
-                  function applyTheme(themeId, css) {
+                  if (cachedTheme) {
                     try {
+                      const themeConfig = JSON.parse(cachedTheme);
+                      console.log('应用缓存主题配置:', themeConfig);
+                      
+                      // 立即应用缓存的主题，避免闪烁
                       const html = document.documentElement;
                       
-                      // 移除所有主题属性
+                      // 清除现有主题
                       html.removeAttribute('data-theme');
                       
-                      // 应用主题
-                      if (themeId && themeId !== 'default') {
-                        html.setAttribute('data-theme', themeId);
+                      // 应用缓存的主题
+                      if (themeConfig.defaultTheme && themeConfig.defaultTheme !== 'default') {
+                        html.setAttribute('data-theme', themeConfig.defaultTheme);
                       }
                       
-                      // 应用自定义CSS
-                      if (css) {
+                      // 应用缓存的自定义CSS
+                      if (themeConfig.customCSS) {
                         let customStyleEl = document.getElementById('custom-theme-css');
                         if (!customStyleEl) {
                           customStyleEl = document.createElement('style');
                           customStyleEl.id = 'custom-theme-css';
                           document.head.appendChild(customStyleEl);
                         }
-                        customStyleEl.textContent = css;
+                        customStyleEl.textContent = themeConfig.customCSS;
                       }
-                      return true;
-                    } catch (e) {
-                      console.error('应用主题失败:', e);
-                      return false;
+                      
+                      console.log('缓存主题已应用:', themeConfig.defaultTheme);
+                    } catch (parseError) {
+                      console.warn('解析缓存主题配置失败:', parseError);
+                      localStorage.removeItem('theme-cache'); // 清除无效缓存
                     }
-                  }
-                  
-                  // 获取预设的主题配置
-                  let themeConfig = {
-                    defaultTheme: 'default',
-                    customCSS: ''
-                  };
-                  
-                  try {
-                    if (window.RUNTIME_CONFIG && window.RUNTIME_CONFIG.THEME_CONFIG) {
-                      themeConfig = window.RUNTIME_CONFIG.THEME_CONFIG;
-                      console.log('使用服务端主题配置:', themeConfig);
-                    } else {
-                      console.log('未找到服务端主题配置，使用默认配置');
-                    }
-                  } catch (e) {
-                    console.warn('获取服务端主题配置失败:', e);
-                  }
-                  
-                  // 立即应用主题配置
-                  const success = applyTheme(themeConfig.defaultTheme, themeConfig.customCSS);
-                  if (success) {
-                    console.log('主题已初始化:', themeConfig.defaultTheme);
                   } else {
-                    console.log('主题初始化失败，将等待客户端重新加载');
+                    console.log('未找到缓存主题，等待API获取');
                   }
-                  
                 } catch (error) {
-                  console.error('主题初始化过程失败:', error);
-                  // 最终备用方案：确保HTML至少没有错误的主题属性
-                  try {
-                    document.documentElement.removeAttribute('data-theme');
-                    console.log('已清除主题属性作为备用方案');
-                  } catch (e) {
-                    console.error('连备用方案也失败了:', e);
-                  }
+                  console.error('应用缓存主题失败:', error);
                 }
               })();
             `,
           }}
         />
+
       </head>
       <body
         className={`${inter.className} min-h-screen bg-white text-gray-900 dark:bg-black dark:text-gray-200`}

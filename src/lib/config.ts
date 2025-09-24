@@ -379,6 +379,15 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
     adminConfig.SiteConfig.RequireDeviceCode = process.env.NEXT_PUBLIC_REQUIRE_DEVICE_CODE !== 'false';
   }
 
+  // 确保 ThemeConfig 存在
+  if (!adminConfig.ThemeConfig) {
+    adminConfig.ThemeConfig = {
+      defaultTheme: 'default',
+      customCSS: '',
+      allowUserCustomization: true,
+    };
+  }
+
   // 站长变更自检
   const ownerUser = process.env.USERNAME;
 
@@ -516,4 +525,8 @@ export async function getAvailableApiSites(user?: string): Promise<ApiSite[]> {
 
 export async function setCachedConfig(config: AdminConfig) {
   cachedConfig = config;
+}
+
+export function clearCachedConfig() {
+  cachedConfig = undefined as any;
 }

@@ -3,6 +3,7 @@ import { getAuthInfoFromCookie } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { AdminConfig } from '@/lib/admin.types';
 import { headers, cookies } from 'next/headers';
+import { getConfig, setCachedConfig, clearCachedConfig } from '@/lib/config';
 
 export async function GET() {
   try {
@@ -22,12 +23,8 @@ export async function GET() {
       return NextResponse.json({ error: '认证信息无效' }, { status: 401 });
     }
 
-    const config = await db.getAdminConfig();
-    const themeConfig = config?.ThemeConfig || {
-      defaultTheme: 'default' as const,
-      customCSS: '',
-      allowUserCustomization: true,
-    };
+    const config = await getConfig();
+    const themeConfig = config.ThemeConfig;
 
     return NextResponse.json({
       success: true,
@@ -75,40 +72,7 @@ export async function POST(request: Request) {
     }
 
     // 获取当前配置
-    const currentConfig = await db.getAdminConfig();
-
-    // 如果没有配置，创建一个基础配置
-    let baseConfig: AdminConfig;
-    if (!currentConfig) {
-      baseConfig = {
-        ConfigSubscribtion: {
-          URL: "",
-          AutoUpdate: false,
-          LastCheck: "",
-        },
-        ConfigFile: "",
-        SiteConfig: {
-          SiteName: "OrangeTV",
-          Announcement: "",
-          SearchDownstreamMaxPage: 10,
-          SiteInterfaceCacheTime: 30,
-          DoubanProxyType: "direct",
-          DoubanProxy: "",
-          DoubanImageProxyType: "direct",
-          DoubanImageProxy: "",
-          DisableYellowFilter: false,
-          FluidSearch: true,
-          RequireDeviceCode: false,
-        },
-        UserConfig: {
-          Users: [],
-        },
-        SourceConfig: [],
-        CustomCategories: [],
-      };
-    } else {
-      baseConfig = currentConfig;
-    }
+    const baseConfig = await getConfig();
 
     // 更新主题配置
     const updatedConfig: AdminConfig = {
@@ -120,9 +84,22 @@ export async function POST(request: Request) {
       },
     };
 
-    console.log('保存主题配置:', updatedConfig.ThemeConfig);
+    console.log('=== 保存主题配置 ===');
+    console.log('请求参数:', { defaultTheme, customCSS, allowUserCustomization });
+    console.log('当前存储类型:', process.env.NEXT_PUBLIC_STORAGE_TYPE || 'localstorage');
+    console.log('待保存配置:', updatedConfig.ThemeConfig);
+    console.log('完整配置对象:', JSON.stringify(updatedConfig, null, 2));
+
     await db.saveAdminConfig(updatedConfig);
     console.log('主题配置保存成功');
+
+    // 直接更新缓存，确保缓存与数据库同步
+    await setCachedConfig(updatedConfig);
+    console.log('已更新配置缓存');
+
+    // 立即验证缓存中的配置
+    const cachedConfig = await getConfig();
+    console.log('保存后验证缓存中的配置:', cachedConfig.ThemeConfig);
 
     return NextResponse.json({
       success: true,

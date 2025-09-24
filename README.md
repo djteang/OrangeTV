@@ -77,6 +77,7 @@ services:
     restart: on-failure
     ports:
       - '3000:3000'
+      - '3001:3001'
     environment:
       - USERNAME=admin
       - PASSWORD=orange
@@ -111,6 +112,7 @@ services:
     restart: on-failure
     ports:
       - '3000:3000'
+      - '3001:3001'
     environment:
       - USERNAME=admin
       - PASSWORD=orange
@@ -147,6 +149,7 @@ services:
     restart: on-failure
     ports:
       - '3000:3000'
+      - '3001:3001'
     environment:
       - USERNAME=admin
       - PASSWORD=orange

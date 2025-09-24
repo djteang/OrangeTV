@@ -20,41 +20,74 @@ export async function GET(request: NextRequest) {
   }
 
   const authInfo = getAuthInfoFromCookie(request);
-  if (!authInfo || !authInfo.username) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-  const username = authInfo.username;
+  const username = authInfo?.username;
 
   try {
     const config = await getConfig();
-    const result: AdminConfigResult = {
-      Role: 'owner',
-      Config: config,
-    };
+
+    // 检查用户权限
+    let userRole = 'guest'; // 未登录用户为 guest
+    let isAdmin = false;
+
     if (username === process.env.USERNAME) {
-      result.Role = 'owner';
-    } else {
+      userRole = 'owner';
+      isAdmin = true;
+    } else if (username) {
       const user = config.UserConfig.Users.find((u) => u.username === username);
       if (user && user.role === 'admin' && !user.banned) {
-        result.Role = 'admin';
+        userRole = 'admin';
+        isAdmin = true;
+      } else if (user && !user.banned) {
+        userRole = 'user';
+      } else if (user && user.banned) {
+        userRole = 'banned';
       } else {
-        return NextResponse.json(
-          { error: '你是管理员吗你就访问？' },
-          { status: 401 }
-        );
+        // 认证了但用户不存在，可能是数据不同步
+        userRole = 'unknown';
       }
     }
 
-    return NextResponse.json(result, {
-      headers: {
-        'Cache-Control': 'no-store', // 管理员配置不缓存
-      },
-    });
+    // 根据用户权限返回不同的配置信息
+    if (isAdmin) {
+      // 管理员返回完整配置
+      const result: AdminConfigResult = {
+        Role: userRole as 'admin' | 'owner',
+        Config: config,
+      };
+
+      return NextResponse.json(result, {
+        headers: {
+          'Cache-Control': 'no-store', // 管理员配置不缓存
+        },
+      });
+    } else {
+      // 普通用户或未登录用户只返回公开配置
+      const publicConfig = {
+        ThemeConfig: config.ThemeConfig,
+        SiteConfig: {
+          SiteName: config.SiteConfig.SiteName,
+          Announcement: config.SiteConfig.Announcement,
+          // 其他公开的站点配置可以在这里添加
+        }
+      };
+
+      const result = {
+        Role: userRole,
+        Config: publicConfig,
+      };
+
+      console.log('返回公开配置给', userRole, '，包含主题配置:', !!publicConfig.ThemeConfig);
+      return NextResponse.json(result, {
+        headers: {
+          'Cache-Control': 'public, max-age=60', // 公开配置可以缓存1分钟
+        },
+      });
+    }
   } catch (error) {
-    console.error('获取管理员配置失败:', error);
+    console.error('获取配置失败:', error);
     return NextResponse.json(
       {
-        error: '获取管理员配置失败',
+        error: '获取配置失败',
         details: (error as Error).message,
       },
       { status: 500 }

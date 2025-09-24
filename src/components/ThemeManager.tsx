@@ -277,32 +277,44 @@ const ThemeManager = ({ showAlert, role }: ThemeManagerProps) => {
 
   const isAdmin = role === 'admin' || role === 'owner';
 
-  // 加载全局主题配置
+  // 更新主题缓存的辅助函数
+  const updateThemeCache = (themeId: string, css: string) => {
+    try {
+      const themeConfig = {
+        defaultTheme: themeId,
+        customCSS: css
+      };
+      localStorage.setItem('theme-cache', JSON.stringify(themeConfig));
+      console.log('主题配置已缓存:', themeConfig);
+    } catch (error) {
+      console.warn('缓存主题配置失败:', error);
+    }
+  };
+
+  // 从API加载主题配置（唯一数据源）
   const loadGlobalThemeConfig = async () => {
     try {
-      // 优先使用运行时配置中的主题配置
-      const runtimeConfig = (window as any).RUNTIME_CONFIG;
-      const serverThemeConfig = runtimeConfig?.THEME_CONFIG;
-
-      if (serverThemeConfig) {
-        console.log('使用服务端预设的主题配置:', serverThemeConfig);
-        setGlobalThemeConfig(serverThemeConfig);
-        return serverThemeConfig;
-      }
-
-      // 如果没有服务端配置，则从API获取
-      console.log('服务端无主题配置，从API获取...');
-      const response = await fetch('/api/theme');
+      console.log('从API获取主题配置...');
+      const response = await fetch('/api/admin/config');
       const result = await response.json();
-      if (result.success) {
-        if (result.fallback) {
-          console.log('API返回备用配置，可能存在数据库访问问题');
+
+      if (result?.Config?.ThemeConfig) {
+        const themeConfig = result.Config.ThemeConfig;
+        console.log('API返回的主题配置:', themeConfig);
+        setGlobalThemeConfig(themeConfig);
+
+        // 更新运行时配置，保持同步
+        const runtimeConfig = (window as any).RUNTIME_CONFIG;
+        if (runtimeConfig) {
+          runtimeConfig.THEME_CONFIG = themeConfig;
         }
-        setGlobalThemeConfig(result.data);
-        return result.data;
+
+        return themeConfig;
+      } else {
+        console.log('无法获取主题配置，可能未登录或权限不足:', result);
       }
     } catch (error) {
-      console.error('加载全局主题配置失败:', error);
+      console.error('从API加载主题配置失败:', error);
     }
     return null;
   };
@@ -332,6 +344,10 @@ const ThemeManager = ({ showAlert, role }: ThemeManagerProps) => {
 
         // 立即应用新的主题配置，确保当前页面也能看到更改
         applyTheme(result.data.defaultTheme, result.data.customCSS);
+
+        // 更新本地缓存
+        updateThemeCache(result.data.defaultTheme, result.data.customCSS);
+
         console.log('已立即应用新主题配置:', result.data.defaultTheme);
 
         showAlert({
@@ -517,6 +533,9 @@ const ThemeManager = ({ showAlert, role }: ThemeManagerProps) => {
           allowUserCustomization: globalThemeConfig?.allowUserCustomization ?? true,
         };
       }
+
+      // 更新本地缓存
+      updateThemeCache(currentTheme, '');
     }
 
     showAlert({
