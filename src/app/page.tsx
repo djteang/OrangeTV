@@ -372,20 +372,21 @@ function HomeClient() {
 
                       return todayAnimes.map((anime, index) => (
                         <div
-                          key={`${anime.id}-${index}`}
+                          key={`${anime.id || 0}-${index}`}
                           className='min-w-[96px] w-24 sm:min-w-[180px] sm:w-44'
                         >
                           <VideoCard
                             from='douban'
-                            title={anime.name_cn || anime.name}
+                            title={anime.name_cn || anime.name || '未知标题'}
                             poster={
-                              anime.images.large ||
-                              anime.images.common ||
-                              anime.images.medium ||
-                              anime.images.small ||
-                              anime.images.grid
+                              anime.images?.large ||
+                              anime.images?.common ||
+                              anime.images?.medium ||
+                              anime.images?.small ||
+                              anime.images?.grid ||
+                              '' // 空字符串，让 VideoCard 组件处理图片加载失败
                             }
-                            douban_id={anime.id}
+                            douban_id={anime.id || 0}
                             rate={anime.rating?.score?.toFixed(1) || ''}
                             year={anime.air_date?.split('-')?.[0] || ''}
                             isBangumi={true}
